@@ -1,0 +1,1004 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Red Bull Flight</title>
+
+<style>
+  * {
+    box-sizing: border-box;
+  }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    background: #071b3d;
+    font-family: Arial, sans-serif;
+  }
+
+  body {
+    display: grid;
+    place-items: center;
+  }
+
+  #wrap {
+    position: relative;
+    width: min(100vw, 480px);
+    height: 100vh;
+    max-height: 900px;
+    overflow: hidden;
+    background: #77c8f5;
+    box-shadow: 0 0 40px #0008;
+  }
+
+  canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  #hud {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    color: white;
+    text-align: center;
+    text-shadow: 0 2px 5px #001a;
+  }
+
+  #score {
+    font-size: 48px;
+    font-weight: 900;
+    margin-top: 26px;
+  }
+
+  #brand {
+    position: absolute;
+    top: 14px;
+    left: 16px;
+    font-weight: 900;
+    letter-spacing: 1px;
+    font-size: 14px;
+  }
+
+  #brand span {
+    color: #ffd72e;
+  }
+
+  .panel {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 82%;
+    padding: 26px 20px;
+    border-radius: 22px;
+    background: #071b3ddd;
+    border: 1px solid #ffffff35;
+    backdrop-filter: blur(8px);
+  }
+
+  h1 {
+    margin: 0 0 8px;
+    font-size: 35px;
+    line-height: .95;
+  }
+
+  p {
+    margin: 8px 0;
+    color: #dcecff;
+  }
+
+  .cta {
+    display: inline-block;
+    margin-top: 14px;
+    background: #ef2637;
+    color: white;
+    border-radius: 999px;
+    padding: 13px 20px;
+    font-weight: 900;
+  }
+
+  .small {
+    font-size: 13px;
+    opacity: .8;
+  }
+
+  #gameover {
+    display: none;
+  }
+</style>
+</head>
+
+<body>
+
+<div id="wrap">
+
+  <canvas id="game"></canvas>
+
+  <div id="hud">
+
+    <div id="brand">
+      RED BULL <span>FLIGHT</span>
+    </div>
+
+    <div id="score">0</div>
+
+    <div id="start" class="panel">
+      <h1>
+        RED BULL<br>
+        FLIGHT
+      </h1>
+
+      <p>Atravesse as latas sem encostar.</p>
+
+      <div class="cta">
+        TOQUE PARA VOAR
+      </div>
+
+      <p class="small">
+        Clique, toque ou pressione espaço
+      </p>
+    </div>
+
+    <div id="gameover" class="panel">
+      <h1>FIM DE VOO</h1>
+
+      <p id="result"></p>
+
+      <div class="cta">
+        TENTAR NOVAMENTE
+      </div>
+
+      <p class="small">
+        Toque para reiniciar
+      </p>
+    </div>
+
+  </div>
+</div>
+
+<script>
+
+const c = document.getElementById("game");
+const ctx = c.getContext("2d");
+
+const scoreEl = document.getElementById("score");
+const startEl = document.getElementById("start");
+const overEl = document.getElementById("gameover");
+const resultEl = document.getElementById("result");
+
+let W;
+let H;
+let dpr;
+
+let player;
+let pipes;
+let score;
+
+let best = +localStorage.rbFlightBest || 0;
+
+let state = "ready";
+
+let spawn;
+let last;
+let speed;
+
+
+/* =========================
+   TAMANHO DO CANVAS
+========================= */
+
+function resize() {
+
+  const r = c.getBoundingClientRect();
+
+  dpr = Math.min(devicePixelRatio || 1, 2);
+
+  c.width = r.width * dpr;
+  c.height = r.height * dpr;
+
+  ctx.setTransform(
+    dpr,
+    0,
+    0,
+    dpr,
+    0,
+    0
+  );
+
+  W = r.width;
+  H = r.height;
+}
+
+addEventListener("resize", resize);
+
+resize();
+
+
+/* =========================
+   RESET
+========================= */
+
+function reset() {
+
+  player = {
+    x: W * 0.27,
+    y: H * 0.45,
+    vy: 0,
+    r: 15,
+    rot: 0
+  };
+
+  pipes = [];
+
+  score = 0;
+
+  spawn = 0;
+
+  last = performance.now();
+
+  speed = 2.7;
+
+  scoreEl.textContent = 0;
+}
+
+reset();
+
+
+/* =========================
+   CONTROLE
+========================= */
+
+function flap() {
+
+  if (state === "ready") {
+
+    state = "play";
+
+    startEl.style.display = "none";
+
+    last = performance.now();
+  }
+
+  else if (state === "over") {
+
+    reset();
+
+    state = "play";
+
+    overEl.style.display = "none";
+  }
+
+  if (state === "play") {
+
+    player.vy = -6.8;
+
+  }
+}
+
+
+/* Clique / toque */
+
+addEventListener(
+  "pointerdown",
+  flap
+);
+
+
+/* Teclado */
+
+addEventListener("keydown", e => {
+
+  if (
+    e.code === "Space" ||
+    e.code === "ArrowUp"
+  ) {
+
+    e.preventDefault();
+
+    flap();
+  }
+
+});
+
+
+/* =========================
+   CRIAR OBSTÁCULOS
+========================= */
+
+function addPipe() {
+
+  const gap = Math.max(
+    142,
+    190 - score * 1.2
+  );
+
+  const margin = 90;
+
+  const center =
+    margin +
+    gap / 2 +
+    Math.random() *
+    (H - 2 * margin - gap);
+
+  pipes.push({
+
+    x: W + 60,
+
+    w: 72,
+
+    gapTop:
+      center - gap / 2,
+
+    gapBottom:
+      center + gap / 2,
+
+    passed: false
+
+  });
+
+}
+
+
+/* =========================
+   DESENHAR LATAS
+========================= */
+
+function can(
+  x,
+  y,
+  w,
+  h,
+  flip = false
+) {
+
+  ctx.save();
+
+  ctx.translate(
+    x + w / 2,
+    y + h / 2
+  );
+
+  if (flip) {
+    ctx.rotate(Math.PI);
+  }
+
+  const hh = h;
+  const ww = w;
+
+
+  /* Corpo metálico */
+
+  let g = ctx.createLinearGradient(
+    -ww / 2,
+    0,
+    ww / 2,
+    0
+  );
+
+  g.addColorStop(
+    0,
+    "#bfc7d1"
+  );
+
+  g.addColorStop(
+    .22,
+    "#f7f9fb"
+  );
+
+  g.addColorStop(
+    .5,
+    "#9da7b4"
+  );
+
+  g.addColorStop(
+    .78,
+    "#eef1f5"
+  );
+
+  g.addColorStop(
+    1,
+    "#87919e"
+  );
+
+  ctx.fillStyle = g;
+
+  ctx.fillRect(
+    -ww / 2,
+    -hh / 2,
+    ww,
+    hh
+  );
+
+
+  /* Faixa azul */
+
+  ctx.fillStyle = "#0a2a67";
+
+  ctx.fillRect(
+    -ww / 2,
+    -hh * .18,
+    ww,
+    hh * .36
+  );
+
+
+  /* Dois círculos vermelhos */
+
+  ctx.fillStyle = "#ef2637";
+
+  ctx.beginPath();
+
+  ctx.arc(
+    -ww * .13,
+    0,
+    ww * .15,
+    0,
+    Math.PI * 2
+  );
+
+  ctx.arc(
+    ww * .13,
+    0,
+    ww * .15,
+    0,
+    Math.PI * 2
+  );
+
+  ctx.fill();
+
+
+  /* Centro amarelo */
+
+  ctx.fillStyle = "#ffd72e";
+
+  ctx.beginPath();
+
+  ctx.arc(
+    0,
+    0,
+    ww * .1,
+    0,
+    Math.PI * 2
+  );
+
+  ctx.fill();
+
+
+  /* Bordas da lata */
+
+  ctx.fillStyle = "#d5dbe2";
+
+  ctx.fillRect(
+    -ww / 2,
+    -hh / 2,
+    ww,
+    8
+  );
+
+  ctx.fillRect(
+    -ww / 2,
+    hh / 2 - 8,
+    ww,
+    8
+  );
+
+  ctx.restore();
+
+}
+
+
+/* =========================
+   PERSONAGEM
+========================= */
+
+function bird() {
+
+  ctx.save();
+
+  ctx.translate(
+    player.x,
+    player.y
+  );
+
+  ctx.rotate(
+    player.rot
+  );
+
+
+  /* Corpo */
+
+  ctx.fillStyle = "#ffd72e";
+
+  ctx.beginPath();
+
+  ctx.ellipse(
+    0,
+    0,
+    21,
+    14,
+    0,
+    0,
+    Math.PI * 2
+  );
+
+  ctx.fill();
+
+
+  /* Asa */
+
+  ctx.fillStyle = "#ef2637";
+
+  ctx.beginPath();
+
+  ctx.moveTo(-8, 0);
+
+  ctx.lineTo(
+    -25,
+    10
+  );
+
+  ctx.lineTo(
+    -15,
+    -7
+  );
+
+  ctx.fill();
+
+
+  /* Olho */
+
+  ctx.fillStyle = "#fff";
+
+  ctx.beginPath();
+
+  ctx.arc(
+    8,
+    -5,
+    5,
+    0,
+    Math.PI * 2
+  );
+
+  ctx.fill();
+
+
+  ctx.fillStyle = "#071b3d";
+
+  ctx.beginPath();
+
+  ctx.arc(
+    10,
+    -5,
+    2,
+    0,
+    Math.PI * 2
+  );
+
+  ctx.fill();
+
+
+  /* Bico */
+
+  ctx.fillStyle = "#ef2637";
+
+  ctx.beginPath();
+
+  ctx.moveTo(
+    18,
+    -1
+  );
+
+  ctx.lineTo(
+    29,
+    3
+  );
+
+  ctx.lineTo(
+    18,
+    6
+  );
+
+  ctx.fill();
+
+
+  ctx.restore();
+
+}
+
+
+/* =========================
+   FUNDO
+========================= */
+
+function bg() {
+
+  let g =
+    ctx.createLinearGradient(
+      0,
+      0,
+      0,
+      H
+    );
+
+  g.addColorStop(
+    0,
+    "#4baeea"
+  );
+
+  g.addColorStop(
+    1,
+    "#d9f4ff"
+  );
+
+  ctx.fillStyle = g;
+
+  ctx.fillRect(
+    0,
+    0,
+    W,
+    H
+  );
+
+
+  /* Nuvens */
+
+  ctx.fillStyle =
+    "#ffffff55";
+
+  for (
+    let i = 0;
+    i < 5;
+    i++
+  ) {
+
+    let x =
+      (
+        i * 137 +
+        performance.now() * .015
+      ) %
+      (W + 180)
+      - 90;
+
+    let y =
+      90 +
+      i * 115;
+
+    ctx.beginPath();
+
+    ctx.ellipse(
+      x,
+      y,
+      55,
+      16,
+      0,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.fill();
+
+  }
+
+
+  /* Montanhas */
+
+  ctx.fillStyle =
+    "#163d68";
+
+  ctx.beginPath();
+
+  ctx.moveTo(
+    0,
+    H
+  );
+
+  ctx.lineTo(
+    0,
+    H * .82
+  );
+
+  ctx.lineTo(
+    W * .2,
+    H * .67
+  );
+
+  ctx.lineTo(
+    W * .39,
+    H * .83
+  );
+
+  ctx.lineTo(
+    W * .63,
+    H * .62
+  );
+
+  ctx.lineTo(
+    W,
+    H * .82
+  );
+
+  ctx.lineTo(
+    W,
+    H
+  );
+
+  ctx.fill();
+
+
+  /* Chão */
+
+  ctx.fillStyle =
+    "#0b284c";
+
+  ctx.fillRect(
+    0,
+    H - 35,
+    W,
+    35
+  );
+
+}
+
+
+/* =========================
+   COLISÃO
+========================= */
+
+function hit(p) {
+
+  const px =
+    player.x;
+
+  const py =
+    player.y;
+
+  const r =
+    player.r;
+
+  if (
+    px + r > p.x &&
+    px - r < p.x + p.w &&
+    (
+      py - r < p.gapTop ||
+      py + r > p.gapBottom
+    )
+  ) {
+
+    return true;
+
+  }
+
+  return false;
+
+}
+
+
+/* =========================
+   GAME OVER
+========================= */
+
+function end() {
+
+  state = "over";
+
+  best =
+    Math.max(
+      best,
+      score
+    );
+
+  localStorage.rbFlightBest =
+    best;
+
+  resultEl.innerHTML =
+    `
+    Pontuação:
+    <b>${score}</b>
+    <br>
+
+    Recorde:
+    <b>${best}</b>
+    `;
+
+  overEl.style.display =
+    "block";
+
+}
+
+
+/* =========================
+   GAME LOOP
+========================= */
+
+function loop(t) {
+
+  let dt =
+    Math.min(
+      (t - last) / 16.67,
+      2
+    );
+
+  last = t;
+
+
+  /* Fundo */
+
+  bg();
+
+
+  /* Jogo rodando */
+
+  if (state === "play") {
+
+    /* Gravidade */
+
+    player.vy +=
+      .38 * dt;
+
+    player.y +=
+      player.vy * dt;
+
+
+    /* Rotação */
+
+    player.rot =
+      Math.max(
+        -.35,
+        Math.min(
+          .8,
+          player.vy * .08
+        )
+      );
+
+
+    /* Spawn */
+
+    spawn += dt;
+
+    if (spawn > 92) {
+
+      spawn = 0;
+
+      addPipe();
+
+    }
+
+
+    /* Velocidade aumenta */
+
+    speed =
+      2.7 +
+      Math.min(
+        score * .035,
+        2
+      );
+
+
+    /* Atualizar latas */
+
+    for (const p of pipes) {
+
+      p.x -=
+        speed * dt;
+
+
+      /* Pontuação */
+
+      if (
+        !p.passed &&
+        p.x + p.w <
+        player.x
+      ) {
+
+        p.passed =
+          true;
+
+        score++;
+
+        scoreEl.textContent =
+          score;
+
+      }
+
+
+      /* Colisão */
+
+      if (hit(p)) {
+
+        end();
+
+      }
+
+    }
+
+
+    /* Remover obstáculos antigos */
+
+    pipes =
+      pipes.filter(
+        p => p.x > -100
+      );
+
+
+    /* Colisão teto/chão */
+
+    if (
+      player.y -
+      player.r <
+      0 ||
+
+      player.y +
+      player.r >
+      H - 35
+    ) {
+
+      end();
+
+    }
+
+  }
+
+
+  /* Animação inicial */
+
+  else if (
+    state === "ready"
+  ) {
+
+    player.y =
+      H * .45 +
+      Math.sin(
+        t * .005
+      ) * 7;
+
+  }
+
+
+  /* Desenhar obstáculos */
+
+  for (const p of pipes) {
+
+    can(
+      p.x,
+      0,
+      p.w,
+      p.gapTop,
+      true
+    );
+
+    can(
+      p.x,
+      p.gapBottom,
+      p.w,
+      H - p.gapBottom
+    );
+
+  }
+
+
+  /* Desenhar personagem */
+
+  bird();
+
+
+  requestAnimationFrame(
+    loop
+  );
+
+}
+
+
+/* Começar loop */
+
+requestAnimationFrame(
+  loop
+);
+
+</script>
+
+</body>
+</html>
